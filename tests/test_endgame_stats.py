@@ -290,6 +290,7 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
     assert "KQ_K" not in txt
     assert "can_win" in txt
     assert "missed_win_to_loss" in txt
+    assert "missed_win_to_loss_pct_over_can_win" in txt
 
 
 def test_analyze_game_counts_missed_opportunities():

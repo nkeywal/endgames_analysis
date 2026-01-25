@@ -373,30 +373,6 @@ def is_trivial_win_against_bare_king(board: chess.Board) -> bool:
     return False
 
 
-def is_trivial_final_for_ended_count(board: chess.Board) -> bool:
-    """Exclude uninteresting 3/4/5-piece finals from ended_in_3to5 counting:
-    - bare king vs (Q or R)
-    - bare king vs >=3 units
-    """
-    if total_pieces(board) not in TRACK_TOTAL_PIECES:
-        return False
-
-    wc = _count_side(board, chess.WHITE)
-    bc = _count_side(board, chess.BLACK)
-
-    def bare_king(c: Dict[str, int]) -> bool:
-        return _extras(c) == 0
-
-    if bare_king(wc):
-        if bc["Q"] > 0 or bc["R"] > 0 or _extras(bc) >= 3:
-            return True
-    if bare_king(bc):
-        if wc["Q"] > 0 or wc["R"] > 0 or _extras(wc) >= 3:
-            return True
-
-    return False
-
-
 def _bishop_token_and_check(board: chess.Board, color: bool) -> Optional[str]:
     bishops = list(board.pieces(chess.BISHOP, color))
     n = len(bishops)
@@ -523,7 +499,6 @@ class GameDeltas:
     per_key_missed_draw: Dict[str, int]
 
     time_loss_key: Optional[str]
-    ended_in_345: bool
 
 
 def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> GameDeltas:
@@ -649,13 +624,6 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
             per_key_errors[key] += 1
             keys_with_error.add(key)
 
-    # ended_in_345: final position is 3/4/5, trackable, and not in the trivial-final exclusions.
-    ended_in_345 = False
-    if total_pieces(board) in TRACK_TOTAL_PIECES:
-        final_key = build_key_for_side_to_move(board)
-        if final_key is not None and (not is_trivial_final_for_ended_count(board)):
-            ended_in_345 = True
-
     # Time loss attribution: attribute to the loser type at the final position (with loser to move).
     time_loss_key: Optional[str] = None
     if time_forfeit and actual_white is not None:
@@ -679,7 +647,6 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         per_key_missed_win_to_loss=dict(per_key_missed_win_to_loss),
         per_key_missed_draw=dict(per_key_missed_draw),
         time_loss_key=time_loss_key,
-        ended_in_345=ended_in_345,
     )
 
 
@@ -695,8 +662,7 @@ class Stats:
     games_skipped_short: int = 0
     games_skipped_parse: int = 0
 
-    games_with_any_phase: int = 0
-    games_ended_in_345: int = 0
+    relevant_games: int = 0
 
     plies_total: int = 0
 
@@ -740,11 +706,8 @@ def write_tsv(
     lines.append(f"# games_skipped_short_plycount<{MIN_PLYCOUNT}={s.games_skipped_short}")
     lines.append(f"# games_skipped_parse={s.games_skipped_parse}")
 
-    lines.append(f"# games_with_any_phase={s.games_with_any_phase}")
-    lines.append(f"# pct_any_phase_over_games_used={(s.games_with_any_phase / denom_used) * 100.0:.6f}")
-
-    lines.append(f"# games_ended_in_3to5={s.games_ended_in_345}")
-    lines.append(f"# pct_ended_in_3to5_over_games_used={(s.games_ended_in_345 / denom_used) * 100.0:.6f}")
+    lines.append(f"# relevant_games={s.relevant_games}")
+    lines.append(f"# pct_relevant_over_games_used={(s.relevant_games / denom_used) * 100.0:.6f}")
 
     lines.append(f"# plies_total={s.plies_total}")
     lines.append(f"# errors_total={s.errors_total}")
@@ -758,11 +721,11 @@ def write_tsv(
     lines.append(f"# can_draw_pct_over_plies_total={((s.can_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
 
     lines.append(f"# missed_win_to_draw_total={s.missed_win_to_draw_total}")
-    lines.append(f"# missed_win_to_draw_pct_over_plies_total={((s.missed_win_to_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# missed_win_to_draw_pct_over_can_win_total={((s.missed_win_to_draw_total / s.can_win_total) * 100.0) if s.can_win_total else 0.0:.8f}")
     lines.append(f"# missed_win_to_loss_total={s.missed_win_to_loss_total}")
-    lines.append(f"# missed_win_to_loss_pct_over_plies_total={((s.missed_win_to_loss_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# missed_win_to_loss_pct_over_can_win_total={((s.missed_win_to_loss_total / s.can_win_total) * 100.0) if s.can_win_total else 0.0:.8f}")
     lines.append(f"# missed_draw_total={s.missed_draw_total}")
-    lines.append(f"# missed_draw_pct_over_plies_total={((s.missed_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# missed_draw_pct_over_can_draw_total={((s.missed_draw_total / s.can_draw_total) * 100.0) if s.can_draw_total else 0.0:.8f}")
 
 
     lines.append(f"# time_loss_games_total={s.time_loss_games_total}")
@@ -776,9 +739,9 @@ def write_tsv(
         "can_draw	can_draw_pct_over_plies	"
         "games_with_error	error_game_pct	"
         "errors	errors_per_ply_pct	"
-        "missed_win_to_draw	missed_win_to_draw_pct_over_plies	"
-        "missed_win_to_loss	missed_win_to_loss_pct_over_plies	"
-        "missed_draw	missed_draw_pct_over_plies	"
+        "missed_win_to_draw	missed_win_to_draw_pct_over_can_win	"
+        "missed_win_to_loss	missed_win_to_loss_pct_over_can_win	"
+        "missed_draw	missed_draw_pct_over_can_draw	"
         "time_losses	time_loss_pct"
     )
 
@@ -810,9 +773,9 @@ def write_tsv(
         err_game_pct = (gerr / g) * 100.0 if g > 0 else 0.0
         err_per_ply_pct = (errs / plies) * 100.0 if plies > 0 else 0.0
 
-        mw2d_pct = (mw2d / plies) * 100.0 if plies > 0 else 0.0
-        mw2l_pct = (mw2l / plies) * 100.0 if plies > 0 else 0.0
-        md_pct = (md / plies) * 100.0 if plies > 0 else 0.0
+        mw2d_pct = (mw2d / can_win) * 100.0 if can_win > 0 else 0.0
+        mw2l_pct = (mw2l / can_win) * 100.0 if can_win > 0 else 0.0
+        md_pct = (md / can_draw) * 100.0 if can_draw > 0 else 0.0
 
         tl_pct = (tl / g) * 100.0 if g > 0 else 0.0
 
@@ -905,7 +868,7 @@ def main() -> None:
 
     def dump_progress(now: float) -> None:
         denom = s.games_used if s.games_used > 0 else 1
-        pct_any = (s.games_with_any_phase / denom) * 100.0
+        pct_any = (s.relevant_games / denom) * 100.0
         err_rate_pct = ((s.errors_total / s.plies_total) * 100.0) if s.plies_total else 0.0
         tl_pct = (s.time_loss_games_total / denom) * 100.0
         print(
@@ -913,7 +876,7 @@ def main() -> None:
             f"  month={args.month} elo=[{elo_min},{elo_max}[ elapsed={(now - t0)/60:.1f}m "
             f"raw_seen={fmt_int(s.raw_seen)} games_seen={fmt_int(s.games_seen)} games_used={fmt_int(s.games_used)} "
             f"skipped_short={fmt_int(s.games_skipped_short)} skipped_parse={fmt_int(s.games_skipped_parse)} "
-            f"games_with_any_phase={fmt_int(s.games_with_any_phase)} pct_any={pct_any:.3f}% "
+            f"relevant_games={fmt_int(s.relevant_games)} pct_rel={pct_any:.3f}% "
             f"plies_total={fmt_int(s.plies_total)} errors_total={fmt_int(s.errors_total)} err/ply={err_rate_pct:.4f}% "
             f"time_losses={fmt_int(s.time_loss_games_total)} tl_pct={tl_pct:.3f}%\n",
             file=sys.stderr,
@@ -978,11 +941,8 @@ def main() -> None:
             # Analyze (TB issues are fatal by design).
             deltas = analyze_game(game, headers, tb)
 
-            if deltas.ended_in_345:
-                s.games_ended_in_345 += 1
-
             if deltas.keys_seen:
-                s.games_with_any_phase += 1
+                s.relevant_games += 1
                 for k in deltas.keys_seen:
                     per_key_games[k] += 1
                 for k in deltas.keys_with_error:

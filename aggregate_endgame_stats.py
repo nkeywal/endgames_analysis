@@ -16,10 +16,10 @@ import sys
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 
-META_RE = re.compile(r"^#\s*([^=]+)=(.*)$")
+META_RE = re.compile(r"^#\s*([^=]+)=(.*)$\s*")
 DEFAULT_GLOB = "endgame_stats_*.tsv"
 
 
@@ -61,8 +61,7 @@ class BucketAgg:
     games_used: int = 0
     games_skipped_short: int = 0
     games_skipped_parse: int = 0
-    games_with_any_phase: int = 0
-    games_ended_in_3to5: int = 0
+    relevant_games: int = 0
     plies_total: int = 0
     errors_total: int = 0
     can_win_total: int = 0
@@ -93,8 +92,7 @@ class BucketAgg:
         self.games_used += geti("games_used")
         self.games_skipped_short += geti("games_skipped_short_plycount<35")
         self.games_skipped_parse += geti("games_skipped_parse")
-        self.games_with_any_phase += geti("games_with_any_phase")
-        self.games_ended_in_3to5 += geti("games_ended_in_3to5")
+        self.relevant_games += geti("relevant_games")
         self.plies_total += geti("plies_total")
         self.errors_total += geti("errors_total")
         
@@ -161,11 +159,8 @@ class BucketAgg:
     def errors_per_ply_pct_total(self) -> float:
         return ((self.errors_total / self.plies_total) * 100.0) if self.plies_total else 0.0
 
-    def pct_any_phase_over_games_used(self) -> float:
-        return ((self.games_with_any_phase / self.games_used) * 100.0) if self.games_used else 0.0
-
-    def pct_ended_in_3to5_over_games_used(self) -> float:
-        return ((self.games_ended_in_3to5 / self.games_used) * 100.0) if self.games_used else 0.0
+    def pct_relevant_over_games_used(self) -> float:
+        return ((self.relevant_games / self.games_used) * 100.0) if self.games_used else 0.0
 
     def pct_time_loss_over_games_used(self) -> float:
         return ((self.time_loss_games_total / self.games_used) * 100.0) if self.games_used else 0.0
@@ -191,7 +186,7 @@ def parse_tsv(path: Path) -> FileStats:
             rows.append(line.split("\t"))
 
     if header is None:
-        raise ValueError(f"Missing TSV header row (material\t...) in {path}")
+        raise ValueError(f"Missing TSV header row (material\t ...) in {path}")
 
     month = meta.get("month", "")
     try:
@@ -239,7 +234,7 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         ("bucket", 16),
         ("months", 7),
         ("games_used", 12),
-        ("%any", 8),
+        ("%rel", 8),
         ("err/ply%", 10),
         ("%time_loss", 10),
     ]
@@ -252,10 +247,10 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         bucket_s = f"{b.elo_min}-{b.elo_max}"
         months_s = str(len(b.months))
         games_used_s = str(b.games_used)
-        pct_any_s = f"{b.pct_any_phase_over_games_used():.2f}"
+        pct_rel_s = f"{b.pct_relevant_over_games_used():.2f}"
         err_s = f"{b.errors_per_ply_pct_total():.4f}"
         tl_s = f"{b.pct_time_loss_over_games_used():.4f}"
-        print(fmt.format(bucket_s, months_s, games_used_s, pct_any_s, err_s, tl_s))
+        print(fmt.format(bucket_s, months_s, games_used_s, pct_rel_s, err_s, tl_s))
 
 
 def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Optional[Set[str]]) -> None:
@@ -266,16 +261,13 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
     print(f"# files={len(b.files)}")
     print(f"# elo_min={b.elo_min}")
     print(f"# elo_max={b.elo_max}")
-    print("# elo_rule=soft")
     print(f"# raw_seen={b.raw_seen}")
     print(f"# games_seen={b.games_seen}")
     print(f"# games_used={b.games_used}")
     print(f"# games_skipped_short_plycount<35={b.games_skipped_short}")
     print(f"# games_skipped_parse={b.games_skipped_parse}")
-    print(f"# games_with_any_phase={b.games_with_any_phase}")
-    print(f"# pct_any_phase_over_games_used={b.pct_any_phase_over_games_used():.6f}")
-    print(f"# games_ended_in_3to5={b.games_ended_in_3to5}")
-    print(f"# pct_ended_in_3to5_over_games_used={b.pct_ended_in_3to5_over_games_used():.6f}")
+    print(f"# relevant_games={b.relevant_games}")
+    print(f"# pct_relevant_over_games_used={b.pct_relevant_over_games_used():.6f}")
     print(f"# plies_total={b.plies_total}")
     print(f"# errors_total={b.errors_total}")
     print(f"# errors_per_ply_pct_total={b.errors_per_ply_pct_total():.8f}")
@@ -286,11 +278,11 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
     print(f"# can_draw_pct_over_plies_total={((b.can_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
 
     print(f"# missed_win_to_draw_total={b.missed_win_to_draw_total}")
-    print(f"# missed_win_to_draw_pct_over_plies_total={((b.missed_win_to_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# missed_win_to_draw_pct_over_can_win_total={((b.missed_win_to_draw_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.8f}")
     print(f"# missed_win_to_loss_total={b.missed_win_to_loss_total}")
-    print(f"# missed_win_to_loss_pct_over_plies_total={((b.missed_win_to_loss_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# missed_win_to_loss_pct_over_can_win_total={((b.missed_win_to_loss_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.8f}")
     print(f"# missed_draw_total={b.missed_draw_total}")
-    print(f"# missed_draw_pct_over_plies_total={((b.missed_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# missed_draw_pct_over_can_draw_total={((b.missed_draw_total / b.can_draw_total) * 100.0) if b.can_draw_total else 0.0:.8f}")
 
     print(f"# time_loss_games_total={b.time_loss_games_total}")
     print(f"# pct_time_loss_over_games_used={b.pct_time_loss_over_games_used():.6f}")
@@ -303,9 +295,9 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
         "can_draw\tcan_draw_pct_over_plies\t"
         "games_with_error\terror_game_pct\t"
         "errors\terrors_per_ply_pct\t"
-        "missed_win_to_draw\tmissed_win_to_draw_pct_over_plies\t"
-        "missed_win_to_loss\tmissed_win_to_loss_pct_over_plies\t"
-        "missed_draw\tmissed_draw_pct_over_plies\t"
+        "missed_win_to_draw\tmissed_win_to_draw_pct_over_can_win\t"
+        "missed_win_to_loss\tmissed_win_to_loss_pct_over_can_win\t"
+        "missed_draw\tmissed_draw_pct_over_can_draw\t"
         "time_losses\ttime_loss_pct"
     )
 
@@ -333,9 +325,9 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
         err_game_pct = (a.games_with_error / games * 100.0) if games else 0.0
         err_per_ply_pct = (a.errors_total / a.plies * 100.0) if a.plies else 0.0
         
-        mw2d_pct = (a.missed_win_to_draw / a.plies * 100.0) if a.plies else 0.0
-        mw2l_pct = (a.missed_win_to_loss / a.plies * 100.0) if a.plies else 0.0
-        md_pct = (a.missed_draw / a.plies * 100.0) if a.plies else 0.0
+        mw2d_pct = (a.missed_win_to_draw / a.can_win * 100.0) if a.can_win > 0 else 0.0
+        mw2l_pct = (a.missed_win_to_loss / a.can_win * 100.0) if a.can_win > 0 else 0.0
+        md_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
         
         tl_pct = (a.time_losses / games * 100.0) if games else 0.0
 
