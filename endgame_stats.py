@@ -626,7 +626,7 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
 
     # Time loss attribution: attribute to the loser type at the final position (with loser to move).
     time_loss_key: Optional[str] = None
-    if time_forfeit and actual_white is not None:
+    if time_forfeit and actual_white in (-1, 1):
         loser_is_white = (actual_white == -1)
         b2 = board.copy(stack=False)
         b2.turn = chess.WHITE if loser_is_white else chess.BLACK
@@ -656,7 +656,6 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
 
 @dataclass
 class Stats:
-    raw_seen: int = 0
     games_seen: int = 0
     games_used: int = 0
     games_skipped_short: int = 0
@@ -700,7 +699,6 @@ def write_tsv(
     lines.append(f"# month={month}")
     lines.append(f"# elo_min={elo_min}")
     lines.append(f"# elo_max={elo_max}")
-    lines.append(f"# raw_seen={s.raw_seen}")
     lines.append(f"# games_seen={s.games_seen}")
     lines.append(f"# games_used={s.games_used}")
     lines.append(f"# games_skipped_short_plycount<{MIN_PLYCOUNT}={s.games_skipped_short}")
@@ -729,7 +727,7 @@ def write_tsv(
 
 
     lines.append(f"# time_loss_games_total={s.time_loss_games_total}")
-    lines.append(f"# pct_time_loss_over_games_used={(s.time_loss_games_total / denom_used) * 100.0:.6f}")
+    lines.append(f"# pct_time_loss_over_relevant_games={(s.time_loss_games_total / s.relevant_games * 100.0) if s.relevant_games else 0.0:.6f}")
 
     lines.append(
         "material	"
@@ -874,7 +872,7 @@ def main() -> None:
         print(
             "progress:\n"
             f"  month={args.month} elo=[{elo_min},{elo_max}[ elapsed={(now - t0)/60:.1f}m "
-            f"raw_seen={fmt_int(s.raw_seen)} games_seen={fmt_int(s.games_seen)} games_used={fmt_int(s.games_used)} "
+            f"games_seen={fmt_int(s.games_seen)} games_used={fmt_int(s.games_used)} "
             f"skipped_short={fmt_int(s.games_skipped_short)} skipped_parse={fmt_int(s.games_skipped_parse)} "
             f"relevant_games={fmt_int(s.relevant_games)} pct_rel={pct_any:.3f}% "
             f"plies_total={fmt_int(s.plies_total)} errors_total={fmt_int(s.errors_total)} err/ply={err_rate_pct:.4f}% "
@@ -904,7 +902,6 @@ def main() -> None:
 
     try:
         for headers, ply_est, raw_pgn in read_games_raw(pgn_stream):
-            s.raw_seen += 1
             s.games_seen += 1
 
             # Early filters (headers-only).

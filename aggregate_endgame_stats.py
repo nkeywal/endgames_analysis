@@ -56,7 +56,6 @@ class BucketAgg:
     files: List[Path] = field(default_factory=list)
 
     # Exact header-level sums.
-    raw_seen: int = 0
     games_seen: int = 0
     games_used: int = 0
     games_skipped_short: int = 0
@@ -87,7 +86,6 @@ class BucketAgg:
             except ValueError:
                 return default
 
-        self.raw_seen += geti("raw_seen")
         self.games_seen += geti("games_seen")
         self.games_used += geti("games_used")
         self.games_skipped_short += geti("games_skipped_short_plycount<35")
@@ -162,8 +160,8 @@ class BucketAgg:
     def pct_relevant_over_games_used(self) -> float:
         return ((self.relevant_games / self.games_used) * 100.0) if self.games_used else 0.0
 
-    def pct_time_loss_over_games_used(self) -> float:
-        return ((self.time_loss_games_total / self.games_used) * 100.0) if self.games_used else 0.0
+    def pct_time_loss_over_relevant_games(self) -> float:
+        return ((self.time_loss_games_total / self.relevant_games) * 100.0) if self.relevant_games else 0.0
 
 
 def parse_tsv(path: Path) -> FileStats:
@@ -236,6 +234,8 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         ("games_used", 12),
         ("%rel", 8),
         ("err/ply%", 10),
+        ("err/win%", 10),
+        ("err/draw%", 10),
         ("%time_loss", 10),
     ]
     fmt = " ".join([f"{{:{w}}}" for _, w in cols])
@@ -247,10 +247,15 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         bucket_s = f"{b.elo_min}-{b.elo_max}"
         months_s = str(len(b.months))
         games_used_s = str(b.games_used)
-        pct_rel_s = f"{b.pct_relevant_over_games_used():.2f}"
-        err_s = f"{b.errors_per_ply_pct_total():.4f}"
-        tl_s = f"{b.pct_time_loss_over_games_used():.4f}"
-        print(fmt.format(bucket_s, months_s, games_used_s, pct_rel_s, err_s, tl_s))
+        pct_rel_s = f"{b.pct_relevant_over_games_used():.3f}"
+        err_s = f"{b.errors_per_ply_pct_total():.3f}"
+        
+        missed_win_total = b.missed_win_to_draw_total + b.missed_win_to_loss_total
+        err_win_s = f"{(missed_win_total / b.can_win_total * 100.0) if b.can_win_total else 0.0:.3f}"
+        err_draw_s = f"{(b.missed_draw_total / b.can_draw_total * 100.0) if b.can_draw_total else 0.0:.3f}"
+        
+        tl_s = f"{b.pct_time_loss_over_relevant_games():.3f}"
+        print(fmt.format(bucket_s, months_s, games_used_s, pct_rel_s, err_s, err_win_s, err_draw_s, tl_s))
 
 
 def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Optional[Set[str]]) -> None:
@@ -261,31 +266,37 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
     print(f"# files={len(b.files)}")
     print(f"# elo_min={b.elo_min}")
     print(f"# elo_max={b.elo_max}")
-    print(f"# raw_seen={b.raw_seen}")
     print(f"# games_seen={b.games_seen}")
     print(f"# games_used={b.games_used}")
     print(f"# games_skipped_short_plycount<35={b.games_skipped_short}")
     print(f"# games_skipped_parse={b.games_skipped_parse}")
     print(f"# relevant_games={b.relevant_games}")
-    print(f"# pct_relevant_over_games_used={b.pct_relevant_over_games_used():.6f}")
+    print(f"# pct_relevant_over_games_used={b.pct_relevant_over_games_used():.3f}")
     print(f"# plies_total={b.plies_total}")
     print(f"# errors_total={b.errors_total}")
-    print(f"# errors_per_ply_pct_total={b.errors_per_ply_pct_total():.8f}")
+    print(f"# errors_per_ply_pct_total={b.errors_per_ply_pct_total():.3f}")
     
     print(f"# can_win_total={b.can_win_total}")
-    print(f"# can_win_pct_over_plies_total={((b.can_win_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# can_win_pct_over_plies_total={((b.can_win_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.3f}")
     print(f"# can_draw_total={b.can_draw_total}")
-    print(f"# can_draw_pct_over_plies_total={((b.can_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# can_draw_pct_over_plies_total={((b.can_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.3f}")
 
     print(f"# missed_win_to_draw_total={b.missed_win_to_draw_total}")
-    print(f"# missed_win_to_draw_pct_over_can_win_total={((b.missed_win_to_draw_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.8f}")
+    print(f"# missed_win_to_draw_pct_over_can_win_total={((b.missed_win_to_draw_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.3f}")
     print(f"# missed_win_to_loss_total={b.missed_win_to_loss_total}")
-    print(f"# missed_win_to_loss_pct_over_can_win_total={((b.missed_win_to_loss_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.8f}")
+    print(f"# missed_win_to_loss_pct_over_can_win_total={((b.missed_win_to_loss_total / b.can_win_total) * 100.0) if b.can_win_total else 0.0:.3f}")
     print(f"# missed_draw_total={b.missed_draw_total}")
-    print(f"# missed_draw_pct_over_can_draw_total={((b.missed_draw_total / b.can_draw_total) * 100.0) if b.can_draw_total else 0.0:.8f}")
+    print(f"# missed_draw_pct_over_can_draw_total={((b.missed_draw_total / b.can_draw_total) * 100.0) if b.can_draw_total else 0.0:.3f}")
+
+    missed_win_total = b.missed_win_to_draw_total + b.missed_win_to_loss_total
+    err_win_opp_total = (missed_win_total / b.can_win_total * 100.0) if b.can_win_total else 0.0
+    err_draw_opp_total = (b.missed_draw_total / b.can_draw_total * 100.0) if b.can_draw_total else 0.0
+
+    print(f"# error_per_win_opportunity_total={err_win_opp_total:.3f}")
+    print(f"# error_per_draw_opportunity_total={err_draw_opp_total:.3f}")
 
     print(f"# time_loss_games_total={b.time_loss_games_total}")
-    print(f"# pct_time_loss_over_games_used={b.pct_time_loss_over_games_used():.6f}")
+    print(f"# pct_time_loss_over_relevant_games={b.pct_time_loss_over_relevant_games():.3f}")
 
     print(
         "material\t"
@@ -298,6 +309,7 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
         "missed_win_to_draw\tmissed_win_to_draw_pct_over_can_win\t"
         "missed_win_to_loss\tmissed_win_to_loss_pct_over_can_win\t"
         "missed_draw\tmissed_draw_pct_over_can_draw\t"
+        "err_win_opp_pct\terr_draw_opp_pct\t"
         "time_losses\ttime_loss_pct"
     )
 
@@ -329,22 +341,83 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
         mw2l_pct = (a.missed_win_to_loss / a.can_win * 100.0) if a.can_win > 0 else 0.0
         md_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
         
+        missed_win = a.missed_win_to_draw + a.missed_win_to_loss
+        err_win_opp_pct = (missed_win / a.can_win * 100.0) if a.can_win > 0 else 0.0
+        err_draw_opp_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
+        
         tl_pct = (a.time_losses / games * 100.0) if games else 0.0
 
         print(
             f"{mat}\t"
-            f"{games}\t{pct_used:.6f}\t"
-            f"{a.plies}\t{avg_plies:.6f}\t"
-            f"{a.can_win}\t{can_win_pct:.6f}\t"
-            f"{a.can_draw}\t{can_draw_pct:.6f}\t"
-            f"{a.games_with_error}\t{err_game_pct:.6f}\t"
-            f"{a.errors_total}\t{err_per_ply_pct:.6f}\t"
-            f"{a.missed_win_to_draw}\t{mw2d_pct:.6f}\t"
-            f"{a.missed_win_to_loss}\t{mw2l_pct:.6f}\t"
-            f"{a.missed_draw}\t{md_pct:.6f}\t"
-            f"{a.time_losses}\t{tl_pct:.6f}"
+            f"{games}\t{pct_used:.3f}\t"
+            f"{a.plies}\t{avg_plies:.3f}\t"
+            f"{a.can_win}\t{can_win_pct:.3f}\t"
+            f"{a.can_draw}\t{can_draw_pct:.3f}\t"
+            f"{a.games_with_error}\t{err_game_pct:.3f}\t"
+            f"{a.errors_total}\t{err_per_ply_pct:.3f}\t"
+            f"{a.missed_win_to_draw}\t{mw2d_pct:.3f}\t"
+            f"{a.missed_win_to_loss}\t{mw2l_pct:.3f}\t"
+            f"{a.missed_draw}\t{md_pct:.3f}\t"
+            f"{err_win_opp_pct:.3f}\t{err_draw_opp_pct:.3f}\t"
+            f"{a.time_losses}\t{tl_pct:.3f}"
         )
         shown += 1
+
+
+def print_metrics_explanation() -> None:
+    text = """
+METRICS
+
+Counts (games)
+- games_seen: games encountered in the input.
+- games_used: games kept after filtering (Elo bucket, Standard, non-Bullet) and successfully parsed.
+- games_skipped_short_plycount<35: games rejected because total plycount < 35.
+
+Relevance
+- relevant_games: games that contain at least one analyzed ply in a non-trivial 3–5 piece position (kings included).
+- %rel: relevant_games / games_used.
+
+Non-trivial / excluded positions
+- Positions are analyzed only if they have 3–5 total pieces and are not excluded (insufficient material, “obvious” patterns you skip, rare promotion/bishop edge-cases).
+
+Counts (plies)
+- plies_total: total number of analyzed plies across all relevant games.
+
+Mover status before each analyzed move (perfect play)
+- can_win_total: analyzed plies where the mover had a forced win.
+- can_draw_total: analyzed plies where the mover could force a draw but not a win.
+- can_win_pct_over_plies_total: can_win_total / plies_total.
+- can_draw_pct_over_plies_total: can_draw_total / plies_total.
+
+Errors (a move reduces what the mover can still guarantee)
+- missed_win_to_draw_total: win → draw.
+- missed_win_to_loss_total: win → loss.
+- missed_draw_total: draw → loss.
+- errors_total: sum of the three counters above.
+
+Key rates
+- missed_win_to_draw_pct_over_can_win_total: missed_win_to_draw_total / can_win_total (share of winning opportunities downgraded to a draw).
+- missed_win_to_loss_pct_over_can_win_total: missed_win_to_loss_total / can_win_total (share of winning opportunities downgraded to a loss).
+- missed_draw_pct_over_can_draw_total: missed_draw_total / can_draw_total (share of drawing opportunities downgraded to a loss).
+
+Aggregate rates
+- err/ply% (errors_per_ply_pct_total): errors_total / plies_total.
+- err/win% (error_per_win_opportunity_total): (missed_win_to_draw_total + missed_win_to_loss_total) / can_win_total (overall failure rate to convert when a win was available).
+- err/draw% (error_per_draw_opportunity_total): missed_draw_total / can_draw_total (overall failure rate to hold when a draw was available).
+
+Time forfeits (conditioned on relevance)
+- time_loss_games_total: relevant games that ended by time forfeit (counted separately from errors).
+- %time_loss: time_loss_games_total / relevant_games.
+
+Per-material table (same definitions, restricted to one oriented key)
+- material: LEFT_RIGHT where LEFT is the side to move.
+- games: relevant games that contain at least one analyzed ply with this key.
+- plies: analyzed plies with this key.
+- avg_plies_per_game: plies / games.
+- games_with_error: games with at least one error in this key.
+- error_game_pct: games_with_error / games.
+"""
+    print(text.strip())
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -379,6 +452,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="Hide materials with fewer than this many games.",
     )
     ap.add_argument(
+        "--metrics",
+        action="store_true",
+        help="Explain the meaning of each metric and exit.",
+    )
+    ap.add_argument(
         "--notes",
         action="store_true",
         help="Print notes about inferred denominators for per-material aggregation.",
@@ -388,6 +466,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+
+    if args.metrics:
+        print_metrics_explanation()
+        return 0
+
     paths = iter_input_paths(args)
     if not paths:
         print(

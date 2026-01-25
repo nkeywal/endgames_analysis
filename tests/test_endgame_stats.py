@@ -253,7 +253,7 @@ def test_time_forfeit_attribution_to_loser_type():
 
 def test_write_tsv_skips_zero_game_rows(tmp_path):
     out = tmp_path / "stats.tsv"
-    s = es.Stats(raw_seen=10, games_seen=10, games_used=10)
+    s = es.Stats(games_seen=10, games_used=10)
     per_key_games = {"KQ_K": 0, "KP_K": 2}
     per_key_games_with_error = {"KP_K": 1}
     per_key_plies_total = {"KP_K": 5}
