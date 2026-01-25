@@ -42,7 +42,7 @@ EXCLUDE_TOTAL_PIECES: Set[int] = {2}
 MIN_PLYCOUNT = 35  # estimated from headers or movetext
 
 # IMPORTANT: relative to current working directory.
-GAVIOTA_ROOT = Path("gaviota")
+GAVIOTA_ROOT = Path("../chess/gaviota")
 
 NON_KING_PIECES = ["Q", "R", "B", "N", "P"]
 PIECE_SYMBOL_TO_LETTER = {
@@ -231,6 +231,11 @@ def _load_gtb_ctypes() -> Any:
     if env:
         candidates.append(env)
 
+    # Try local path found in the parent project structure
+    local_lib = Path("../chess/Gaviota-Tablebases/libgtb.so.1.0.1")
+    if local_lib.exists():
+        candidates.append(str(local_lib))
+
     found = ctypes.util.find_library("gtb")
     if found:
         candidates.append(found)
@@ -260,25 +265,29 @@ def open_tablebase_native_fixed(dirs: List[Path]) -> chess.gaviota.NativeTableba
     We patch tb_restart to pass a null-terminated list if the underlying handle is accessible.
     """
     tb: chess.gaviota.NativeTablebase
+    
+    # Prioritize loading our specific lib via ctypes to avoid segfaults from system libs
     try:
-        tb = chess.gaviota.NativeTablebase()  # works on many python-chess versions
-    except TypeError:
         lib = _load_gtb_ctypes()
         tb = chess.gaviota.NativeTablebase(lib)
-
-    # Add directories first.
-    for d in dirs:
-        tb.add_directory(str(d))
+    except Exception:
+        try:
+            tb = chess.gaviota.NativeTablebase()  # fallback to python-chess default
+        except TypeError:
+            # Re-raise if we can't load it at all
+            raise
 
     # Patch tb_restart only if the internal handle is accessible (best-effort).
     try:
         import ctypes  # noqa: F401
 
-        if hasattr(tb, "libgtb") and hasattr(tb.libgtb, "tb_restart") and hasattr(tb, "paths"):
+        if hasattr(tb, "libgtb") and hasattr(tb.libgtb, "tb_restart"):
             tb.libgtb.tb_restart.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
             tb.libgtb.tb_restart.restype = ctypes.c_char_p
 
             def _tb_restart_null_terminated() -> None:
+                if not hasattr(tb, "paths"): 
+                    return
                 n = len(tb.paths)
                 c_paths = (ctypes.c_char_p * (n + 1))()
                 c_paths[:n] = [p.encode("utf-8") for p in tb.paths]
@@ -292,6 +301,10 @@ def open_tablebase_native_fixed(dirs: List[Path]) -> chess.gaviota.NativeTableba
             tb._tb_restart = _tb_restart_null_terminated  # type: ignore[attr-defined]
     except Exception:
         pass
+
+    # Add directories first.
+    for d in dirs:
+        tb.add_directory(str(d))
 
     return tb
 
