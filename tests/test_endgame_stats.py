@@ -89,10 +89,10 @@ def test_fast_ply_count_ignores_move_numbers_results_nags_and_single_token_comme
     assert fast_ply_count(movetext) == 4
 
 
-def test_in_bucket_soft():
-    assert es.in_bucket_soft(1700, 1750, 1600, 2100)
-    assert not es.in_bucket_soft(1200, 1300, 1600, 2100)
-    assert not es.in_bucket_soft(1600, 2400, 1600, 2100)
+def test_in_bucket():
+    assert es.in_bucket(1700, 1750, 1600, 2100)
+    assert not es.in_bucket(1200, 1300, 1600, 2100)
+    assert not es.in_bucket(1600, 2400, 1600, 2100)
 
 
 def test_build_key_opposite_colored_bishops_normalizes_to_D_when_not_insufficient():
@@ -259,6 +259,13 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
     per_key_plies_total = {"KP_K": 5}
     per_key_errors_total = {"KP_K": 2}
     per_key_time_losses = {"KP_K": 0}
+    
+    # New metrics dicts
+    per_key_can_win_total = {"KP_K": 1}
+    per_key_can_draw_total = {"KP_K": 1}
+    per_key_missed_win_to_draw_total = {"KP_K": 0}
+    per_key_missed_win_to_loss_total = {"KP_K": 0}
+    per_key_missed_draw_total = {"KP_K": 0}
 
     es.write_tsv(
         out_path=out,
@@ -270,12 +277,81 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
         per_key_games_with_error=per_key_games_with_error,
         per_key_plies_total=per_key_plies_total,
         per_key_errors_total=per_key_errors_total,
+        per_key_can_win_total=per_key_can_win_total,
+        per_key_can_draw_total=per_key_can_draw_total,
+        per_key_missed_win_to_draw_total=per_key_missed_win_to_draw_total,
+        per_key_missed_win_to_loss_total=per_key_missed_win_to_loss_total,
+        per_key_missed_draw_total=per_key_missed_draw_total,
         per_key_time_losses=per_key_time_losses,
     )
 
     txt = out.read_text(encoding="utf-8")
     assert "KP_K" in txt
     assert "KQ_K" not in txt
+    assert "can_win" in txt
+    assert "missed_win_to_loss" in txt
+
+
+def test_analyze_game_counts_missed_opportunities():
+    # Setup: 
+    # Ply 1: White to move. Win (1). Moves to Draw (0). -> Missed Win to Draw.
+    # Ply 2: Black to move. Draw (0). Moves to Loss (-1). -> Missed Draw (Blunder).
+    
+    fen0 = "8/8/8/8/8/8/4P3/4K2k w - - 0 1" # White to move
+    b0 = chess.Board(fen0)
+    move1 = chess.Move.from_uci("e2e4") # White blunders win to draw
+    
+    b1 = b0.copy(stack=False)
+    b1.push(move1) # Now Black to move
+    move2 = chess.Move.from_uci("h1h2") # Black blunders draw to loss
+    
+    b2 = b1.copy(stack=False)
+    b2.push(move2) # Result
+
+    # Fake TB:
+    # b0 (White to move): Win for White (+1). Mover=White. Mover WDL = +1.
+    # b1 (Black to move): Draw (0). Mover=Black. Mover WDL = 0.
+    # b2 (White to move): Win for White (+1). 
+    # Wait, if b1->b2 makes b2 WinForWhite, then for Black (mover at b1), b2 is Loss (-1).
+    
+    tb = FakeTablebase({
+        (b0.board_fen(), b0.turn): 1,  # White winning
+        (b1.board_fen(), b1.turn): 0,  # Draw
+        (b2.board_fen(), b2.turn): 1,  # White winning (so Black lost)
+    })
+
+    pgn = f"""\
+[Event "Test"]
+[Site "https://lichess.org/missed"]
+[Result "*"]
+[SetUp "1"]
+[FEN "{fen0}"]
+
+1. e4 Kh2 *
+"""
+    game = make_game_from_pgn(pgn)
+    headers = dict(game.headers)
+
+    deltas = es.analyze_game(game, headers, tb)
+    
+    # Ply 1 (White): +1 -> 0. Missed Win to Draw.
+    # Key should be KP_K (White has P, Black has K)
+    key1 = "KP_K" 
+    
+    # Ply 2 (Black): 0 -> -1. Missed Draw.
+    # Key should be K_KP (Black has K, White has P)
+    key2 = "K_KP"
+
+    # Verify counts
+    assert deltas.per_key_plies[key1] == 1
+    assert deltas.per_key_can_win[key1] == 1
+    assert deltas.per_key_missed_win_to_draw[key1] == 1
+    assert deltas.per_key_errors[key1] == 1
+    
+    assert deltas.per_key_plies[key2] == 1
+    assert deltas.per_key_can_draw[key2] == 1
+    assert deltas.per_key_missed_draw[key2] == 1
+    assert deltas.per_key_errors[key2] == 1
 
 
 def test_parse_args_default_exclude_bullet_and_override(monkeypatch):

@@ -41,6 +41,11 @@ class MaterialAgg:
     games_with_error: int = 0
     errors_total: int = 0
     time_losses: int = 0
+    can_win: int = 0
+    can_draw: int = 0
+    missed_win_to_draw: int = 0
+    missed_win_to_loss: int = 0
+    missed_draw: int = 0
 
 
 @dataclass
@@ -60,6 +65,11 @@ class BucketAgg:
     games_ended_in_3to5: int = 0
     plies_total: int = 0
     errors_total: int = 0
+    can_win_total: int = 0
+    can_draw_total: int = 0
+    missed_win_to_draw_total: int = 0
+    missed_win_to_loss_total: int = 0
+    missed_draw_total: int = 0
     time_loss_games_total: int = 0
 
     # Per-material aggregation.
@@ -87,6 +97,13 @@ class BucketAgg:
         self.games_ended_in_3to5 += geti("games_ended_in_3to5")
         self.plies_total += geti("plies_total")
         self.errors_total += geti("errors_total")
+        
+        self.can_win_total += geti("can_win_total")
+        self.can_draw_total += geti("can_draw_total")
+        self.missed_win_to_draw_total += geti("missed_win_to_draw_total")
+        self.missed_win_to_loss_total += geti("missed_win_to_loss_total")
+        self.missed_draw_total += geti("missed_draw_total")
+        
         self.time_loss_games_total += geti("time_loss_games_total")
 
         # Per-material rows.
@@ -113,6 +130,12 @@ class BucketAgg:
             gerr = val("games_with_error")
             errs = val("errors")
             tl = val("time_losses")
+            
+            cw = val("can_win")
+            cd = val("can_draw")
+            mw2d = val("missed_win_to_draw")
+            mw2l = val("missed_win_to_loss")
+            md = val("missed_draw")
 
             agg = self.per_material.get(mat)
             if agg is None:
@@ -124,6 +147,12 @@ class BucketAgg:
             agg.games_with_error += gerr
             agg.errors_total += errs
             agg.time_losses += tl
+            
+            agg.can_win += cw
+            agg.can_draw += cd
+            agg.missed_win_to_draw += mw2d
+            agg.missed_win_to_loss += mw2l
+            agg.missed_draw += md
 
     def finalize(self) -> None:
         self.months = sorted(set(self.months))
@@ -229,7 +258,7 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         print(fmt.format(bucket_s, months_s, games_used_s, pct_any_s, err_s, tl_s))
 
 
-def print_bucket_full(b: BucketAgg, top: int, min_games: int) -> None:
+def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Optional[Set[str]]) -> None:
     print()
     print(f"### AGG bucket elo{b.elo_min}-{b.elo_max}")
     print("# month=AGG")
@@ -250,6 +279,19 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int) -> None:
     print(f"# plies_total={b.plies_total}")
     print(f"# errors_total={b.errors_total}")
     print(f"# errors_per_ply_pct_total={b.errors_per_ply_pct_total():.8f}")
+    
+    print(f"# can_win_total={b.can_win_total}")
+    print(f"# can_win_pct_over_plies_total={((b.can_win_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# can_draw_total={b.can_draw_total}")
+    print(f"# can_draw_pct_over_plies_total={((b.can_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+
+    print(f"# missed_win_to_draw_total={b.missed_win_to_draw_total}")
+    print(f"# missed_win_to_draw_pct_over_plies_total={((b.missed_win_to_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# missed_win_to_loss_total={b.missed_win_to_loss_total}")
+    print(f"# missed_win_to_loss_pct_over_plies_total={((b.missed_win_to_loss_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+    print(f"# missed_draw_total={b.missed_draw_total}")
+    print(f"# missed_draw_pct_over_plies_total={((b.missed_draw_total / b.plies_total) * 100.0) if b.plies_total else 0.0:.8f}")
+
     print(f"# time_loss_games_total={b.time_loss_games_total}")
     print(f"# pct_time_loss_over_games_used={b.pct_time_loss_over_games_used():.6f}")
 
@@ -257,8 +299,13 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int) -> None:
         "material\t"
         "games\tgames_pct_over_used\t"
         "plies\tavg_plies_per_game\t"
+        "can_win\tcan_win_pct_over_plies\t"
+        "can_draw\tcan_draw_pct_over_plies\t"
         "games_with_error\terror_game_pct\t"
         "errors\terrors_per_ply_pct\t"
+        "missed_win_to_draw\tmissed_win_to_draw_pct_over_plies\t"
+        "missed_win_to_loss\tmissed_win_to_loss_pct_over_plies\t"
+        "missed_draw\tmissed_draw_pct_over_plies\t"
         "time_losses\ttime_loss_pct"
     )
 
@@ -269,6 +316,8 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int) -> None:
 
     shown = 0
     for mat, a in items:
+        if keep_types is not None and mat not in keep_types:
+            continue
         if a.games < min_games:
             continue
         if top and shown >= top:
@@ -277,16 +326,30 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int) -> None:
         games = a.games
         pct_used = (games / denom_used) * 100.0
         avg_plies = (a.plies / games) if games else 0.0
+        
+        can_win_pct = (a.can_win / a.plies * 100.0) if a.plies else 0.0
+        can_draw_pct = (a.can_draw / a.plies * 100.0) if a.plies else 0.0
+        
         err_game_pct = (a.games_with_error / games * 100.0) if games else 0.0
         err_per_ply_pct = (a.errors_total / a.plies * 100.0) if a.plies else 0.0
+        
+        mw2d_pct = (a.missed_win_to_draw / a.plies * 100.0) if a.plies else 0.0
+        mw2l_pct = (a.missed_win_to_loss / a.plies * 100.0) if a.plies else 0.0
+        md_pct = (a.missed_draw / a.plies * 100.0) if a.plies else 0.0
+        
         tl_pct = (a.time_losses / games * 100.0) if games else 0.0
 
         print(
             f"{mat}\t"
             f"{games}\t{pct_used:.6f}\t"
             f"{a.plies}\t{avg_plies:.6f}\t"
+            f"{a.can_win}\t{can_win_pct:.6f}\t"
+            f"{a.can_draw}\t{can_draw_pct:.6f}\t"
             f"{a.games_with_error}\t{err_game_pct:.6f}\t"
             f"{a.errors_total}\t{err_per_ply_pct:.6f}\t"
+            f"{a.missed_win_to_draw}\t{mw2d_pct:.6f}\t"
+            f"{a.missed_win_to_loss}\t{mw2l_pct:.6f}\t"
+            f"{a.missed_draw}\t{md_pct:.6f}\t"
             f"{a.time_losses}\t{tl_pct:.6f}"
         )
         shown += 1
@@ -306,22 +369,27 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         default=DEFAULT_GLOB,
         help="Glob used when no positional paths are provided.",
     )
-    ap.add_argument(
-        "--full",
-        action="store_true",
-        help="Also print an aggregated per-material TSV block per bucket.",
-    )
+    # --full is now default behavior, flag removed.
     ap.add_argument(
         "--top",
         type=int,
         default=0,
-        help="When --full, show only the top N materials by games (0=all).",
+        help="Show only the top N materials by games (0=all).",
+    )
+    ap.add_argument(
+        "--types",
+        help="Comma-separated list of material keys to show (e.g. KR_KP,KQ_KQP). Symmetric (A_B implies B_A).",
     )
     ap.add_argument(
         "--min-games",
         type=int,
         default=0,
-        help="When --full, hide materials with fewer than this many games.",
+        help="Hide materials with fewer than this many games.",
+    )
+    ap.add_argument(
+        "--notes",
+        action="store_true",
+        help="Print notes about inferred denominators for per-material aggregation.",
     )
     return ap.parse_args(argv)
 
@@ -361,11 +429,24 @@ def main(argv: Optional[List[str]] = None) -> int:
         b.finalize()
     bucket_list.sort(key=lambda x: (x.elo_min, x.elo_max))
 
+    keep_types: Optional[Set[str]] = None
+    if args.types:
+        keep_types = set()
+        for t in args.types.split(","):
+            t = t.strip()
+            if not t:
+                continue
+            keep_types.add(t)
+            # Handle symmetry A_B -> B_A
+            if "_" in t:
+                parts = t.split("_", 1)
+                rev = f"{parts[1]}_{parts[0]}"
+                keep_types.add(rev)
+
     print_summary(bucket_list)
 
-    if args.full:
-        for b in bucket_list:
-            print_bucket_full(b, top=args.top, min_games=args.min_games)
+    for b in bucket_list:
+        print_bucket_full(b, top=args.top, min_games=args.min_games, keep_types=keep_types)
 
     return 0
 
