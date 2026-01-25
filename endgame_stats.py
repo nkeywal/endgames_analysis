@@ -190,7 +190,7 @@ def termination_is_time_forfeit(headers: Dict[str, str]) -> bool:
     return "time" in (headers.get("Termination") or "").lower()
 
 
-def in_bucket_soft(we: int, be: int, elo_min: int, elo_max: int) -> bool:
+def in_bucket(we: int, be: int, elo_min: int, elo_max: int) -> bool:
     s = we + be
     if not (2 * elo_min <= s < 2 * elo_max):
         return False
@@ -511,6 +511,17 @@ class GameDeltas:
     keys_with_error: Set[str]
     per_key_plies: Dict[str, int]
     per_key_errors: Dict[str, int]
+
+    # Per-ply "capability" counters (evaluated at each analyzed ply, before the move).
+    # can_draw means exactly-draw (WDL == 0) from the mover point of view.
+    per_key_can_win: Dict[str, int]
+    per_key_can_draw: Dict[str, int]
+
+    # Missed opportunities (evaluated on the transition caused by the played move).
+    per_key_missed_win_to_draw: Dict[str, int]
+    per_key_missed_win_to_loss: Dict[str, int]
+    per_key_missed_draw: Dict[str, int]
+
     time_loss_key: Optional[str]
     ended_in_345: bool
 
@@ -522,6 +533,12 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
     keys_with_error: Set[str] = set()
     per_key_plies: Dict[str, int] = defaultdict(int)
     per_key_errors: Dict[str, int] = defaultdict(int)
+
+    per_key_can_win: Dict[str, int] = defaultdict(int)
+    per_key_can_draw: Dict[str, int] = defaultdict(int)
+    per_key_missed_win_to_draw: Dict[str, int] = defaultdict(int)
+    per_key_missed_win_to_loss: Dict[str, int] = defaultdict(int)
+    per_key_missed_draw: Dict[str, int] = defaultdict(int)
 
     actual_white = result_to_white_outcome(headers.get("Result", ""))
     time_forfeit = termination_is_time_forfeit(headers)
@@ -582,8 +599,19 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
             san = "<san-unavailable>"
         uci = move.uci()
 
+        had_cached_before = (cached_wdl_white is not None)
+
         w_before = cached_wdl_white if cached_wdl_white is not None else probe_wdl_white_or_die(f"before ply={ply_idx}")
         mover_is_white = (board.turn == chess.WHITE)
+
+        # WDL from the mover's perspective, before making the move.
+        before_mover = w_before if mover_is_white else -w_before
+
+        # Capability counters: evaluated at each analyzed ply (before the move).
+        if before_mover == 1:
+            per_key_can_win[key] += 1
+        if before_mover == 0:
+            per_key_can_draw[key] += 1
 
         board.push(move)
 
@@ -591,8 +619,15 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         w_after = probe_wdl_white_or_die(f"after ply={ply_idx}")
         cached_wdl_white = w_after
 
-        before_mover = w_before if mover_is_white else -w_before
         after_mover = w_after if mover_is_white else -w_after
+
+        # Missed opportunities: classify WDL drops.
+        if before_mover == 1 and after_mover == 0:
+            per_key_missed_win_to_draw[key] += 1
+        elif before_mover == 1 and after_mover == -1:
+            per_key_missed_win_to_loss[key] += 1
+        elif before_mover == 0 and after_mover == -1:
+            per_key_missed_draw[key] += 1
 
         # Invariant: with perfect TB opponent evaluation, a single move should not "improve" mover's WDL category.
         # If it does, something is inconsistent (probe / keying / caching / board normalization).
@@ -607,7 +642,7 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
             print(f"  fen_after ={fen_after}", file=sys.stderr)
             print(f"  wdl_white_before={w_before} wdl_white_after={w_after}", file=sys.stderr)
             print(f"  wdl_mover_before={before_mover} wdl_mover_after={after_mover}", file=sys.stderr)
-            print(f"  cached_before={'yes' if cached_wdl_white is not None else 'no'}", file=sys.stderr)
+            print(f"  cached_before={'yes' if had_cached_before else 'no'}", file=sys.stderr)
             raise RuntimeError(f"WDL improved for mover at ply={ply_idx}. {site_tag}")
 
         if after_mover != before_mover:
@@ -638,6 +673,11 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         keys_with_error=keys_with_error,
         per_key_plies=dict(per_key_plies),
         per_key_errors=dict(per_key_errors),
+        per_key_can_win=dict(per_key_can_win),
+        per_key_can_draw=dict(per_key_can_draw),
+        per_key_missed_win_to_draw=dict(per_key_missed_win_to_draw),
+        per_key_missed_win_to_loss=dict(per_key_missed_win_to_loss),
+        per_key_missed_draw=dict(per_key_missed_draw),
         time_loss_key=time_loss_key,
         ended_in_345=ended_in_345,
     )
@@ -659,7 +699,14 @@ class Stats:
     games_ended_in_345: int = 0
 
     plies_total: int = 0
+
+    # Aggregate move-quality counters (mover POV)
     errors_total: int = 0
+    can_win_total: int = 0
+    can_draw_total: int = 0
+    missed_win_to_draw_total: int = 0
+    missed_win_to_loss_total: int = 0
+    missed_draw_total: int = 0
 
     time_loss_games_total: int = 0
 
@@ -674,6 +721,11 @@ def write_tsv(
     per_key_games_with_error: Dict[str, int],
     per_key_plies_total: Dict[str, int],
     per_key_errors_total: Dict[str, int],
+    per_key_can_win_total: Dict[str, int],
+    per_key_can_draw_total: Dict[str, int],
+    per_key_missed_win_to_draw_total: Dict[str, int],
+    per_key_missed_win_to_loss_total: Dict[str, int],
+    per_key_missed_draw_total: Dict[str, int],
     per_key_time_losses: Dict[str, int],
 ) -> None:
     denom_used = s.games_used if s.games_used > 0 else 1
@@ -682,7 +734,6 @@ def write_tsv(
     lines.append(f"# month={month}")
     lines.append(f"# elo_min={elo_min}")
     lines.append(f"# elo_max={elo_max}")
-    lines.append(f"# elo_rule=soft")
     lines.append(f"# raw_seen={s.raw_seen}")
     lines.append(f"# games_seen={s.games_seen}")
     lines.append(f"# games_used={s.games_used}")
@@ -701,19 +752,38 @@ def write_tsv(
         f"# errors_per_ply_pct_total={((s.errors_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}"
     )
 
+    lines.append(f"# can_win_total={s.can_win_total}")
+    lines.append(f"# can_win_pct_over_plies_total={((s.can_win_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# can_draw_total={s.can_draw_total}")
+    lines.append(f"# can_draw_pct_over_plies_total={((s.can_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+
+    lines.append(f"# missed_win_to_draw_total={s.missed_win_to_draw_total}")
+    lines.append(f"# missed_win_to_draw_pct_over_plies_total={((s.missed_win_to_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# missed_win_to_loss_total={s.missed_win_to_loss_total}")
+    lines.append(f"# missed_win_to_loss_pct_over_plies_total={((s.missed_win_to_loss_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+    lines.append(f"# missed_draw_total={s.missed_draw_total}")
+    lines.append(f"# missed_draw_pct_over_plies_total={((s.missed_draw_total / s.plies_total) * 100.0) if s.plies_total else 0.0:.8f}")
+
+
     lines.append(f"# time_loss_games_total={s.time_loss_games_total}")
     lines.append(f"# pct_time_loss_over_games_used={(s.time_loss_games_total / denom_used) * 100.0:.6f}")
 
     lines.append(
-        "material\t"
-        "games\tgames_pct_over_used\t"
-        "plies\tavg_plies_per_game\t"
-        "games_with_error\terror_game_pct\t"
-        "errors\terrors_per_ply_pct\t"
-        "time_losses\ttime_loss_pct"
+        "material	"
+        "games	games_pct_over_used	"
+        "plies	avg_plies_per_game	"
+        "can_win	can_win_pct_over_plies	"
+        "can_draw	can_draw_pct_over_plies	"
+        "games_with_error	error_game_pct	"
+        "errors	errors_per_ply_pct	"
+        "missed_win_to_draw	missed_win_to_draw_pct_over_plies	"
+        "missed_win_to_loss	missed_win_to_loss_pct_over_plies	"
+        "missed_draw	missed_draw_pct_over_plies	"
+        "time_losses	time_loss_pct"
     )
 
     # Only output lines with non-zero games.
+
     for k in sorted(per_key_games.keys()):
         g = per_key_games.get(k, 0)
         if g == 0:
@@ -722,23 +792,42 @@ def write_tsv(
         gerr = per_key_games_with_error.get(k, 0)
         plies = per_key_plies_total.get(k, 0)
         errs = per_key_errors_total.get(k, 0)
+
+        can_win = per_key_can_win_total.get(k, 0)
+        can_draw = per_key_can_draw_total.get(k, 0)
+        mw2d = per_key_missed_win_to_draw_total.get(k, 0)
+        mw2l = per_key_missed_win_to_loss_total.get(k, 0)
+        md = per_key_missed_draw_total.get(k, 0)
+
         tl = per_key_time_losses.get(k, 0)
 
         pct_used = (g / denom_used) * 100.0
         avg_plies = (plies / g) if g > 0 else 0.0
 
+        can_win_pct = (can_win / plies) * 100.0 if plies > 0 else 0.0
+        can_draw_pct = (can_draw / plies) * 100.0 if plies > 0 else 0.0
+
         err_game_pct = (gerr / g) * 100.0 if g > 0 else 0.0
         err_per_ply_pct = (errs / plies) * 100.0 if plies > 0 else 0.0
+
+        mw2d_pct = (mw2d / plies) * 100.0 if plies > 0 else 0.0
+        mw2l_pct = (mw2l / plies) * 100.0 if plies > 0 else 0.0
+        md_pct = (md / plies) * 100.0 if plies > 0 else 0.0
 
         tl_pct = (tl / g) * 100.0 if g > 0 else 0.0
 
         lines.append(
-            f"{k}\t"
-            f"{g}\t{pct_used:.6f}\t"
-            f"{plies}\t{avg_plies:.6f}\t"
-            f"{gerr}\t{err_game_pct:.6f}\t"
-            f"{errs}\t{err_per_ply_pct:.6f}\t"
-            f"{tl}\t{tl_pct:.6f}"
+            f"{k}	"
+            f"{g}	{pct_used:.6f}	"
+            f"{plies}	{avg_plies:.6f}	"
+            f"{can_win}	{can_win_pct:.6f}	"
+            f"{can_draw}	{can_draw_pct:.6f}	"
+            f"{gerr}	{err_game_pct:.6f}	"
+            f"{errs}	{err_per_ply_pct:.6f}	"
+            f"{mw2d}	{mw2d_pct:.6f}	"
+            f"{mw2l}	{mw2l_pct:.6f}	"
+            f"{md}	{md_pct:.6f}	"
+            f"{tl}	{tl_pct:.6f}"
         )
 
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -799,6 +888,11 @@ def main() -> None:
     per_key_games_with_error: Dict[str, int] = defaultdict(int)
     per_key_plies_total: Dict[str, int] = defaultdict(int)
     per_key_errors_total: Dict[str, int] = defaultdict(int)
+    per_key_can_win_total: Dict[str, int] = defaultdict(int)
+    per_key_can_draw_total: Dict[str, int] = defaultdict(int)
+    per_key_missed_win_to_draw_total: Dict[str, int] = defaultdict(int)
+    per_key_missed_win_to_loss_total: Dict[str, int] = defaultdict(int)
+    per_key_missed_draw_total: Dict[str, int] = defaultdict(int)
     per_key_time_losses: Dict[str, int] = defaultdict(int)
 
     if args.pgn == "-":
@@ -816,7 +910,7 @@ def main() -> None:
         tl_pct = (s.time_loss_games_total / denom) * 100.0
         print(
             "progress:\n"
-            f"  month={args.month} elo_soft=[{elo_min},{elo_max}[ elapsed={(now - t0)/60:.1f}m "
+            f"  month={args.month} elo=[{elo_min},{elo_max}[ elapsed={(now - t0)/60:.1f}m "
             f"raw_seen={fmt_int(s.raw_seen)} games_seen={fmt_int(s.games_seen)} games_used={fmt_int(s.games_used)} "
             f"skipped_short={fmt_int(s.games_skipped_short)} skipped_parse={fmt_int(s.games_skipped_parse)} "
             f"games_with_any_phase={fmt_int(s.games_with_any_phase)} pct_any={pct_any:.3f}% "
@@ -837,6 +931,11 @@ def main() -> None:
             per_key_games_with_error=dict(per_key_games_with_error),
             per_key_plies_total=dict(per_key_plies_total),
             per_key_errors_total=dict(per_key_errors_total),
+            per_key_can_win_total=dict(per_key_can_win_total),
+            per_key_can_draw_total=dict(per_key_can_draw_total),
+            per_key_missed_win_to_draw_total=dict(per_key_missed_win_to_draw_total),
+            per_key_missed_win_to_loss_total=dict(per_key_missed_win_to_loss_total),
+            per_key_missed_draw_total=dict(per_key_missed_draw_total),
             per_key_time_losses=dict(per_key_time_losses),
         )
 
@@ -857,7 +956,7 @@ def main() -> None:
             be = _int_or_none(headers.get("BlackElo"))
             if we is None or be is None:
                 continue
-            if not in_bucket_soft(we, be, elo_min, elo_max):
+            if not in_bucket(we, be, elo_min, elo_max):
                 continue
 
             if ply_est < MIN_PLYCOUNT:
@@ -896,6 +995,27 @@ def main() -> None:
             for k, v in deltas.per_key_errors.items():
                 per_key_errors_total[k] += v
                 s.errors_total += v
+
+
+            for k, v in deltas.per_key_can_win.items():
+                per_key_can_win_total[k] += v
+                s.can_win_total += v
+
+            for k, v in deltas.per_key_can_draw.items():
+                per_key_can_draw_total[k] += v
+                s.can_draw_total += v
+
+            for k, v in deltas.per_key_missed_win_to_draw.items():
+                per_key_missed_win_to_draw_total[k] += v
+                s.missed_win_to_draw_total += v
+
+            for k, v in deltas.per_key_missed_win_to_loss.items():
+                per_key_missed_win_to_loss_total[k] += v
+                s.missed_win_to_loss_total += v
+
+            for k, v in deltas.per_key_missed_draw.items():
+                per_key_missed_draw_total[k] += v
+                s.missed_draw_total += v
 
             if deltas.time_loss_key is not None:
                 per_key_time_losses[deltas.time_loss_key] += 1
