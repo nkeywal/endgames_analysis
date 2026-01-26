@@ -273,6 +273,7 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
         month="2025-02",
         elo_min=2500,
         elo_max=5000,
+        increment="all",
         s=s,
         per_key_games=per_key_games,
         per_key_games_with_error=per_key_games_with_error,

@@ -697,6 +697,7 @@ def write_tsv(
     month: str,
     elo_min: int,
     elo_max: int,
+    increment: str,
     s: Stats,
     per_key_games: Dict[str, int],
     per_key_games_with_error: Dict[str, int],
@@ -716,6 +717,8 @@ def write_tsv(
     lines.append(f"# month={month}")
     lines.append(f"# elo_min={elo_min}")
     lines.append(f"# elo_max={elo_max}")
+    lines.append(f"# increment={increment}")
+    lines.append("# game_type=blitz_standard")
     lines.append(f"# games_seen={s.games_seen}")
     lines.append(f"# games_used={s.games_used}")
     lines.append(f"# games_skipped_short_plycount<{MIN_PLYCOUNT}={s.games_skipped_short}")
@@ -899,6 +902,7 @@ def main() -> None:
             month=args.month,
             elo_min=elo_min,
             elo_max=elo_max,
+            increment=args.increment,
             s=s,
             per_key_games=dict(per_key_games),
             per_key_games_with_error=dict(per_key_games_with_error),

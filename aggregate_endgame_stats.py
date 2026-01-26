@@ -55,6 +55,7 @@ class BucketAgg:
     elo_max: int
     months: List[str] = field(default_factory=list)
     files: List[Path] = field(default_factory=list)
+    increments: Set[str] = field(default_factory=set)
 
     # Exact header-level sums.
     games_seen: int = 0
@@ -78,6 +79,8 @@ class BucketAgg:
     def add_file(self, fs: FileStats) -> None:
         self.months.append(fs.month)
         self.files.append(fs.path)
+        inc = fs.meta.get("increment") or "unknown"
+        self.increments.add(inc)
 
         def geti(name: str, default: int = 0) -> int:
             v = fs.meta.get(name)
@@ -274,6 +277,11 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
     print(f"# files={len(b.files)}")
     print(f"# elo_min={b.elo_min}")
     print(f"# elo_max={b.elo_max}")
+    inc_s = "unknown"
+    if b.increments:
+        inc_s = ",".join(sorted(b.increments))
+    print(f"# increment={inc_s}")
+    print("# game_type=blitz_standard")
     print(f"# games_seen={b.games_seen}")
     print(f"# games_used={b.games_used}")
     print(f"# games_skipped_short_plycount<35={b.games_skipped_short}")
@@ -452,6 +460,7 @@ Time forfeits (conditioned on relevance)
 
 Per-material table (same definitions, restricted to one oriented key)
 - material: LEFT_RIGHT where LEFT is the side to move.
+  - Pieces use standard letters (K, Q, R, B, N, P). Bishop color encoding: B when both sides have bishops on the same color, D when bishops are on opposite colors.
 - games: relevant games that contain at least one analyzed ply with this key.
 - plies: analyzed plies with this key.
 - avg_plies_per_game: plies / games.
