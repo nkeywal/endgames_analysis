@@ -497,6 +497,7 @@ class GameDeltas:
     per_key_missed_draw: Dict[str, int]
 
     time_loss_key: Optional[str]
+    time_draw_key: Optional[str]
 
 
 def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> GameDeltas:
@@ -533,8 +534,6 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         if total_pieces(b) in TRACK_TOTAL_PIECES and b.castling_rights:
             if not castling_warned:
                 cr = chess.Board(None).castling_xfen().replace("-", "")
-                # Better: show actual rights by building a temporary board from FEN.
-                # But we keep it simple and still include the FEN.
                 print(
                     f'WARNING: {site_tag} Someone managed to reach a {total_pieces(b)}-piece endgame while still being allowed to castle; '
                     f'zeroing castling rights for TB probe. ctx={ctx} fen="{b.fen()}"',
@@ -622,17 +621,28 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
             per_key_errors[key] += 1
             keys_with_error.add(key)
 
-    # Time loss attribution: attribute to the loser type at the final position (with loser to move).
+    # Time Outcome Attribution
     time_loss_key: Optional[str] = None
-    if time_forfeit and actual_white in (-1, 1):
-        loser_is_white = (actual_white == -1)
-        b2 = board.copy(stack=False)
-        b2.turn = chess.WHITE if loser_is_white else chess.BLACK
-        k_loser = build_key_for_side_to_move(b2)
-        if k_loser is not None:
-            time_loss_key = k_loser
-            # Ensure it is counted as appearing (even if no subsequent ply exists).
-            keys_seen.add(k_loser)
+    time_draw_key: Optional[str] = None
+
+    if time_forfeit:
+        if actual_white in (-1, 1):
+            loser_is_white = (actual_white == -1)
+            b2 = board.copy(stack=False)
+            b2.turn = chess.WHITE if loser_is_white else chess.BLACK
+            k_loser = build_key_for_side_to_move(b2)
+            if k_loser is not None:
+                time_loss_key = k_loser
+                keys_seen.add(k_loser)
+        elif actual_white == 0:
+            # Assume the side whose turn it was at end of PGN is the one who flagged.
+            flagger_is_white = (board.turn == chess.WHITE)
+            b2 = board.copy(stack=False)
+            b2.turn = chess.WHITE if flagger_is_white else chess.BLACK
+            k_flagger = build_key_for_side_to_move(b2)
+            if k_flagger is not None:
+                time_draw_key = k_flagger
+                keys_seen.add(k_flagger)
 
     return GameDeltas(
         keys_seen=keys_seen,
@@ -645,6 +655,7 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         per_key_missed_win_to_loss=dict(per_key_missed_win_to_loss),
         per_key_missed_draw=dict(per_key_missed_draw),
         time_loss_key=time_loss_key,
+        time_draw_key=time_draw_key,
     )
 
 
@@ -674,6 +685,7 @@ class Stats:
     missed_draw_total: int = 0
 
     time_loss_games_total: int = 0
+    time_draw_games_total: int = 0
 
 
 def write_tsv(
@@ -692,6 +704,7 @@ def write_tsv(
     per_key_missed_win_to_loss_total: Dict[str, int],
     per_key_missed_draw_total: Dict[str, int],
     per_key_time_losses: Dict[str, int],
+    per_key_time_draws: Dict[str, int],
 ) -> None:
     denom_used = s.games_used if s.games_used > 0 else 1
 
@@ -729,6 +742,7 @@ def write_tsv(
 
 
     lines.append(f"# time_loss_games_total={s.time_loss_games_total}")
+    lines.append(f"# time_draw_games_total={s.time_draw_games_total}")
     lines.append(f"# pct_time_loss_over_relevant_games={(s.time_loss_games_total / s.relevant_games * 100.0) if s.relevant_games else 0.0:.6f}")
 
     lines.append(
@@ -742,7 +756,8 @@ def write_tsv(
         "missed_win_to_draw	missed_win_to_draw_pct_over_can_win	"
         "missed_win_to_loss	missed_win_to_loss_pct_over_can_win	"
         "missed_draw	missed_draw_pct_over_can_draw	"
-        "time_losses	time_loss_pct"
+        "time_losses	time_loss_pct	"
+        "time_draws	time_draw_pct"
     )
 
     # Only output lines with non-zero games.
@@ -763,6 +778,7 @@ def write_tsv(
         md = per_key_missed_draw_total.get(k, 0)
 
         tl = per_key_time_losses.get(k, 0)
+        td = per_key_time_draws.get(k, 0)
 
         pct_used = (g / denom_used) * 100.0
         avg_plies = (plies / g) if g > 0 else 0.0
@@ -778,6 +794,7 @@ def write_tsv(
         md_pct = (md / can_draw) * 100.0 if can_draw > 0 else 0.0
 
         tl_pct = (tl / g) * 100.0 if g > 0 else 0.0
+        td_pct = (td / g) * 100.0 if g > 0 else 0.0
 
         lines.append(
             f"{k}	"
@@ -790,7 +807,8 @@ def write_tsv(
             f"{mw2d}	{mw2d_pct:.6f}	"
             f"{mw2l}	{mw2l_pct:.6f}	"
             f"{md}	{md_pct:.6f}	"
-            f"{tl}	{tl_pct:.6f}"
+            f"{tl}	{tl_pct:.6f}	"
+            f"{td}	{td_pct:.6f}"
         )
 
     tmp = out_path.with_suffix(out_path.suffix + ".tmp")
@@ -843,6 +861,7 @@ def main() -> None:
     per_key_missed_win_to_loss_total: Dict[str, int] = defaultdict(int)
     per_key_missed_draw_total: Dict[str, int] = defaultdict(int)
     per_key_time_losses: Dict[str, int] = defaultdict(int)
+    per_key_time_draws: Dict[str, int] = defaultdict(int)
 
     if args.pgn == "-":
         pgn_stream = sys.stdin
@@ -864,7 +883,8 @@ def main() -> None:
             f"skipped_short={fmt_int(s.games_skipped_short)} skipped_parse={fmt_int(s.games_skipped_parse)} "
             f"relevant_games={fmt_int(s.relevant_games)} pct_rel={pct_any:.3f}% "
             f"plies_total={fmt_int(s.plies_total)} errors_total={fmt_int(s.errors_total)} err/ply={err_rate_pct:.4f}% "
-            f"time_losses={fmt_int(s.time_loss_games_total)} tl_pct={tl_pct:.3f}%\n",
+            f"time_losses={fmt_int(s.time_loss_games_total)} tl_pct={tl_pct:.3f}% "
+            f"time_draws={fmt_int(s.time_draw_games_total)}\n",
             file=sys.stderr,
             flush=True,
         )
@@ -886,6 +906,7 @@ def main() -> None:
             per_key_missed_win_to_loss_total=dict(per_key_missed_win_to_loss_total),
             per_key_missed_draw_total=dict(per_key_missed_draw_total),
             per_key_time_losses=dict(per_key_time_losses),
+            per_key_time_draws=dict(per_key_time_draws),
         )
 
     try:
@@ -968,6 +989,10 @@ def main() -> None:
             if deltas.time_loss_key is not None:
                 per_key_time_losses[deltas.time_loss_key] += 1
                 s.time_loss_games_total += 1
+            
+            if deltas.time_draw_key is not None:
+                per_key_time_draws[deltas.time_draw_key] += 1
+                s.time_draw_games_total += 1
 
             now = time.time()
             if args.log_every > 0 and (now - last_log) >= args.log_every:
