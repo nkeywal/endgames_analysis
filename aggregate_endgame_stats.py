@@ -41,6 +41,7 @@ class MaterialAgg:
     games_with_error: int = 0
     errors_total: int = 0
     time_losses: int = 0
+    time_draws: int = 0
     can_win: int = 0
     can_draw: int = 0
     missed_win_to_draw: int = 0
@@ -69,6 +70,7 @@ class BucketAgg:
     missed_win_to_loss_total: int = 0
     missed_draw_total: int = 0
     time_loss_games_total: int = 0
+    time_draw_games_total: int = 0
 
     # Per-material aggregation.
     per_material: Dict[str, MaterialAgg] = field(default_factory=dict)
@@ -101,6 +103,7 @@ class BucketAgg:
         self.missed_draw_total += geti("missed_draw_total")
         
         self.time_loss_games_total += geti("time_loss_games_total")
+        self.time_draw_games_total += geti("time_draw_games_total")
 
         # Per-material rows.
         col = {name: i for i, name in enumerate(fs.header)}
@@ -126,6 +129,7 @@ class BucketAgg:
             gerr = val("games_with_error")
             errs = val("errors")
             tl = val("time_losses")
+            td = val("time_draws")
             
             cw = val("can_win")
             cd = val("can_draw")
@@ -143,6 +147,7 @@ class BucketAgg:
             agg.games_with_error += gerr
             agg.errors_total += errs
             agg.time_losses += tl
+            agg.time_draws += td
             
             agg.can_win += cw
             agg.can_draw += cd
@@ -162,6 +167,9 @@ class BucketAgg:
 
     def pct_time_loss_over_relevant_games(self) -> float:
         return ((self.time_loss_games_total / self.relevant_games) * 100.0) if self.relevant_games else 0.0
+
+    def pct_time_draw_over_relevant_games(self) -> float:
+        return ((self.time_draw_games_total / self.relevant_games) * 100.0) if self.relevant_games else 0.0
 
 
 def parse_tsv(path: Path) -> FileStats:
@@ -297,6 +305,8 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
 
     print(f"# time_loss_games_total={b.time_loss_games_total}")
     print(f"# pct_time_loss_over_relevant_games={b.pct_time_loss_over_relevant_games():.3f}")
+    print(f"# time_draw_games_total={b.time_draw_games_total}")
+    print(f"# pct_time_draw_over_relevant_games={b.pct_time_draw_over_relevant_games():.3f}")
 
     if raw_only:
         print(
@@ -306,11 +316,11 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
             "can_win\t"
             "can_draw\t"
             "games_with_error\t"
-            "errors\t"
             "missed_win_to_draw\t"
             "missed_win_to_loss\t"
             "missed_draw\t"
-            "time_losses"
+            "time_losses\t"
+            "time_draws"
         )
     else:
         print(
@@ -320,12 +330,12 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
             "can_win\tcan_win_pct_over_plies\t"
             "can_draw\tcan_draw_pct_over_plies\t"
             "games_with_error\terror_game_pct\t"
-            "errors\terrors_per_ply_pct\t"
             "missed_win_to_draw\tmissed_win_to_draw_pct_over_can_win\t"
             "missed_win_to_loss\tmissed_win_to_loss_pct_over_can_win\t"
             "missed_draw\tmissed_draw_pct_over_can_draw\t"
             "err_win_opp_pct\terr_draw_opp_pct\t"
-            "time_losses\ttime_loss_pct"
+            "time_losses\ttime_loss_pct\t"
+            "time_draws\ttime_draw_pct"
         )
 
     denom_used = b.games_used if b.games_used > 0 else 1
@@ -350,11 +360,11 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
                 f"{a.can_win}\t"
                 f"{a.can_draw}\t"
                 f"{a.games_with_error}\t"
-                f"{a.errors_total}\t"
                 f"{a.missed_win_to_draw}\t"
                 f"{a.missed_win_to_loss}\t"
                 f"{a.missed_draw}\t"
-                f"{a.time_losses}"
+                f"{a.time_losses}\t"
+                f"{a.time_draws}"
             )
         else:
             games = a.games
@@ -365,8 +375,6 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
             can_draw_pct = (a.can_draw / a.plies * 100.0) if a.plies else 0.0
             
             err_game_pct = (a.games_with_error / games * 100.0) if games else 0.0
-            err_per_ply_pct = (a.errors_total / a.plies * 100.0) if a.plies else 0.0
-            
             mw2d_pct = (a.missed_win_to_draw / a.can_win * 100.0) if a.can_win > 0 else 0.0
             mw2l_pct = (a.missed_win_to_loss / a.can_win * 100.0) if a.can_win > 0 else 0.0
             md_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
@@ -376,6 +384,7 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
             err_draw_opp_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
             
             tl_pct = (a.time_losses / games * 100.0) if games else 0.0
+            td_pct = (a.time_draws / games * 100.0) if games else 0.0
 
             print(
                 f"{mat}\t"
@@ -384,12 +393,12 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
                 f"{a.can_win}\t{can_win_pct:.3f}\t"
                 f"{a.can_draw}\t{can_draw_pct:.3f}\t"
                 f"{a.games_with_error}\t{err_game_pct:.3f}\t"
-                f"{a.errors_total}\t{err_per_ply_pct:.3f}\t"
                 f"{a.missed_win_to_draw}\t{mw2d_pct:.3f}\t"
                 f"{a.missed_win_to_loss}\t{mw2l_pct:.3f}\t"
                 f"{a.missed_draw}\t{md_pct:.3f}\t"
                 f"{err_win_opp_pct:.3f}\t{err_draw_opp_pct:.3f}\t"
-                f"{a.time_losses}\t{tl_pct:.3f}"
+                f"{a.time_losses}\t{tl_pct:.3f}\t"
+                f"{a.time_draws}\t{td_pct:.3f}"
             )
         shown += 1
 
@@ -438,6 +447,8 @@ Aggregate rates
 Time forfeits (conditioned on relevance)
 - time_loss_games_total: relevant games that ended by time forfeit (counted separately from errors).
 - %time_loss: time_loss_games_total / relevant_games.
+- time_draw_games_total: relevant games that ended by time forfeit but were scored as draws.
+- %time_draw: time_draw_games_total / relevant_games.
 
 Per-material table (same definitions, restricted to one oriented key)
 - material: LEFT_RIGHT where LEFT is the side to move.
@@ -446,6 +457,8 @@ Per-material table (same definitions, restricted to one oriented key)
 - avg_plies_per_game: plies / games.
 - games_with_error: games with at least one error in this key.
 - error_game_pct: games_with_error / games.
+- time_draws: games that ended by time forfeit but were scored as draws for this key.
+- time_draw_pct: time_draws / games.
 """
     print(text.strip())
 

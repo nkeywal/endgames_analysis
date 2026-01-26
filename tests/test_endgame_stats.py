@@ -266,6 +266,7 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
     per_key_missed_win_to_draw_total = {"KP_K": 0}
     per_key_missed_win_to_loss_total = {"KP_K": 0}
     per_key_missed_draw_total = {"KP_K": 0}
+    per_key_time_draws = {"KP_K": 0}
 
     es.write_tsv(
         out_path=out,
@@ -283,6 +284,7 @@ def test_write_tsv_skips_zero_game_rows(tmp_path):
         per_key_missed_win_to_loss_total=per_key_missed_win_to_loss_total,
         per_key_missed_draw_total=per_key_missed_draw_total,
         per_key_time_losses=per_key_time_losses,
+        per_key_time_draws=per_key_time_draws,
     )
 
     txt = out.read_text(encoding="utf-8")
@@ -355,19 +357,19 @@ def test_analyze_game_counts_missed_opportunities():
     assert deltas.per_key_errors[key2] == 1
 
 
-def test_parse_args_default_exclude_bullet_and_override(monkeypatch):
+def test_parse_args_default_increment_and_override(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
         ["endgame_stats.py", "--pgn", "-", "--month", "2025-02", "--elo-min", "1600", "--elo-max", "2100"],
     )
     args = es.parse_args()
-    assert args.exclude_bullet is True
+    assert args.increment == "all"
 
     monkeypatch.setattr(
         sys,
         "argv",
-        ["endgame_stats.py", "--pgn", "-", "--month", "2025-02", "--elo-min", "1600", "--elo-max", "2100", "--include-bullet"],
+        ["endgame_stats.py", "--pgn", "-", "--month", "2025-02", "--elo-min", "1600", "--elo-max", "2100", "--increment", "yes"],
     )
     args = es.parse_args()
-    assert args.exclude_bullet is False
+    assert args.increment == "yes"
