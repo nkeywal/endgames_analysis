@@ -534,6 +534,8 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
         if total_pieces(b) in TRACK_TOTAL_PIECES and b.castling_rights:
             if not castling_warned:
                 cr = chess.Board(None).castling_xfen().replace("-", "")
+                # Better: show actual rights by building a temporary board from FEN.
+                # But we keep it simple and still include the FEN.
                 print(
                     f'WARNING: {site_tag} Someone managed to reach a {total_pieces(b)}-piece endgame while still being allowed to castle; '
                     f'zeroing castling rights for TB probe. ctx={ctx} fen="{b.fen()}"',
@@ -626,6 +628,7 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
     time_draw_key: Optional[str] = None
 
     if time_forfeit:
+        # Case 1: Decisive result (1-0 or 0-1) => Time Loss
         if actual_white in (-1, 1):
             loser_is_white = (actual_white == -1)
             b2 = board.copy(stack=False)
@@ -634,8 +637,9 @@ def analyze_game(game: chess.pgn.Game, headers: Dict[str, str], tb: Any) -> Game
             if k_loser is not None:
                 time_loss_key = k_loser
                 keys_seen.add(k_loser)
+        # Case 2: Draw result (1/2-1/2) => Time Draw
+        # e.g., Rook flags against King (material insufficient to lose)
         elif actual_white == 0:
-            # Assume the side whose turn it was at end of PGN is the one who flagged.
             flagger_is_white = (board.turn == chess.WHITE)
             b2 = board.copy(stack=False)
             b2.turn = chess.WHITE if flagger_is_white else chess.BLACK
@@ -831,7 +835,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--elo-min", type=int, required=True)
     ap.add_argument("--elo-max", type=int, required=True)
     ap.add_argument("--out-dir", type=Path, default=Path("."))
-
+    ap.add_argument("--increment", choices=["all", "yes", "no"], default="all", help="Filter games by time increment.")
     ap.add_argument("--log-every", type=float, default=60.0, help="Seconds between progress logs; 0 disables.")
     return ap.parse_args()
 
@@ -913,7 +917,6 @@ def main() -> None:
         for headers, ply_est, raw_pgn in read_games_raw(pgn_stream):
             s.games_seen += 1
 
-            # Early filters (headers-only).
             if not is_rated_event(headers.get("Event", "")):
                 continue
             if not is_standard_variant_tag(headers.get("Variant", "")):
@@ -926,11 +929,17 @@ def main() -> None:
             if not in_bucket(we, be, elo_min, elo_max):
                 continue
 
+            if args.increment != "all":
+                has_inc = has_increment(headers)
+                if args.increment == "yes" and not has_inc:
+                    continue
+                if args.increment == "no" and has_inc:
+                    continue
+
             if ply_est < MIN_PLYCOUNT:
                 s.games_skipped_short += 1
                 continue
 
-            # Parse PGN (only now).
             try:
                 game = chess.pgn.read_game(io.StringIO(raw_pgn))
                 if game is None:
@@ -942,7 +951,6 @@ def main() -> None:
 
             s.games_used += 1
 
-            # Analyze (TB issues are fatal by design).
             deltas = analyze_game(game, headers, tb)
 
             if deltas.keys_seen:
