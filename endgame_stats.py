@@ -170,24 +170,22 @@ def is_standard_variant_tag(variant: str) -> bool:
     return (not v) or (v == "standard")
 
 
-def is_bullet(headers: Dict[str, str]) -> bool:
-    tc = (headers.get("TimeControl") or "").strip()
-    if not tc or tc == "-":
-        return False
-    if "+" in tc:
-        base = tc.split("+", 1)[0]
-        try:
-            return int(base) < 180
-        except ValueError:
-            return False
-    try:
-        return int(tc) < 180
-    except ValueError:
-        return False
-
-
 def termination_is_time_forfeit(headers: Dict[str, str]) -> bool:
     return "time" in (headers.get("Termination") or "").lower()
+
+
+def has_increment(headers: Dict[str, str]) -> bool:
+    """Check if the game has a time increment (TimeControl 'seconds+increment' where increment > 0)."""
+    tc = headers.get("TimeControl", "")
+    if "+" in tc:
+        try:
+            parts = tc.split("+")
+            if len(parts) >= 2:
+                inc = int(parts[1])
+                return inc > 0
+        except ValueError:
+            pass
+    return False
 
 
 def in_bucket(we: int, be: int, elo_min: int, elo_max: int) -> bool:
@@ -662,6 +660,8 @@ class Stats:
     games_skipped_parse: int = 0
 
     relevant_games: int = 0
+    relevant_games_with_increment: int = 0
+    relevant_games_without_increment: int = 0
 
     plies_total: int = 0
 
@@ -705,6 +705,8 @@ def write_tsv(
     lines.append(f"# games_skipped_parse={s.games_skipped_parse}")
 
     lines.append(f"# relevant_games={s.relevant_games}")
+    lines.append(f"# relevant_games_with_increment={s.relevant_games_with_increment}")
+    lines.append(f"# relevant_games_without_increment={s.relevant_games_without_increment}")
     lines.append(f"# pct_relevant_over_games_used={(s.relevant_games / denom_used) * 100.0:.6f}")
 
     lines.append(f"# plies_total={s.plies_total}")
@@ -812,20 +814,6 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--elo-max", type=int, required=True)
     ap.add_argument("--out-dir", type=Path, default=Path("."))
 
-    # Default: exclude bullet (True). Allow overriding to include bullet.
-    ap.add_argument(
-        "--exclude-bullet",
-        action="store_true",
-        default=True,
-        help="Exclude bullet games (default). Use --include-bullet to include bullet games.",
-    )
-    ap.add_argument(
-        "--include-bullet",
-        action="store_false",
-        dest="exclude_bullet",
-        help="Include bullet games.",
-    )
-
     ap.add_argument("--log-every", type=float, default=60.0, help="Seconds between progress logs; 0 disables.")
     return ap.parse_args()
 
@@ -909,8 +897,6 @@ def main() -> None:
                 continue
             if not is_standard_variant_tag(headers.get("Variant", "")):
                 continue
-            if args.exclude_bullet and is_bullet(headers):
-                continue
 
             we = _int_or_none(headers.get("WhiteElo"))
             be = _int_or_none(headers.get("BlackElo"))
@@ -940,6 +926,11 @@ def main() -> None:
 
             if deltas.keys_seen:
                 s.relevant_games += 1
+                if has_increment(headers):
+                    s.relevant_games_with_increment += 1
+                else:
+                    s.relevant_games_without_increment += 1
+
                 for k in deltas.keys_seen:
                     per_key_games[k] += 1
                 for k in deltas.keys_with_error:

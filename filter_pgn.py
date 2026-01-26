@@ -99,11 +99,16 @@ def is_standard(headers: Dict[str, str]) -> bool:
     return (not v) or (v == "standard")
 
 
-def is_bullet(headers: Dict[str, str]) -> bool:
+def is_blitz(headers: Dict[str, str]) -> bool:
     speed = (headers.get("Speed") or "").strip().lower()
     if speed:
-        return speed in {"bullet", "ultrabullet", "hyperbullet"}
-    return "bullet" in (headers.get("Event") or "").lower()
+        return speed == "blitz"
+    return "blitz" in (headers.get("Event") or "").lower()
+
+
+def is_excluded_termination(headers: Dict[str, str]) -> bool:
+    term = (headers.get("Termination") or "").strip().lower()
+    return term in {"rules infraction", "unterminated"}
 
 
 def main() -> None:
@@ -134,7 +139,9 @@ def main() -> None:
                 continue
             if not is_standard(headers):
                 continue
-            if is_bullet(headers):
+            if not is_blitz(headers):
+                continue
+            if is_excluded_termination(headers):
                 continue
 
             we = parse_elo(headers.get("WhiteElo"))

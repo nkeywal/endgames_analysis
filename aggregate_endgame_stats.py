@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set
 
 
-META_RE = re.compile(r"^#\s*([^=]+)=(.*)$\s*")
+META_RE = re.compile(r"^#\s*([^=]+)=(.*)$")
 DEFAULT_GLOB = "endgame_stats_*.tsv"
 
 
@@ -258,7 +258,7 @@ def print_summary(buckets: List[BucketAgg]) -> None:
         print(fmt.format(bucket_s, months_s, games_used_s, pct_rel_s, err_s, err_win_s, err_draw_s, tl_s))
 
 
-def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Optional[Set[str]]) -> None:
+def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Optional[Set[str]], raw_only: bool = False) -> None:
     print()
     print(f"### AGG bucket elo{b.elo_min}-{b.elo_max}")
     print("# month=AGG")
@@ -298,20 +298,35 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
     print(f"# time_loss_games_total={b.time_loss_games_total}")
     print(f"# pct_time_loss_over_relevant_games={b.pct_time_loss_over_relevant_games():.3f}")
 
-    print(
-        "material\t"
-        "games\tgames_pct_over_used\t"
-        "plies\tavg_plies_per_game\t"
-        "can_win\tcan_win_pct_over_plies\t"
-        "can_draw\tcan_draw_pct_over_plies\t"
-        "games_with_error\terror_game_pct\t"
-        "errors\terrors_per_ply_pct\t"
-        "missed_win_to_draw\tmissed_win_to_draw_pct_over_can_win\t"
-        "missed_win_to_loss\tmissed_win_to_loss_pct_over_can_win\t"
-        "missed_draw\tmissed_draw_pct_over_can_draw\t"
-        "err_win_opp_pct\terr_draw_opp_pct\t"
-        "time_losses\ttime_loss_pct"
-    )
+    if raw_only:
+        print(
+            "material\t"
+            "games\t"
+            "plies\t"
+            "can_win\t"
+            "can_draw\t"
+            "games_with_error\t"
+            "errors\t"
+            "missed_win_to_draw\t"
+            "missed_win_to_loss\t"
+            "missed_draw\t"
+            "time_losses"
+        )
+    else:
+        print(
+            "material\t"
+            "games\tgames_pct_over_used\t"
+            "plies\tavg_plies_per_game\t"
+            "can_win\tcan_win_pct_over_plies\t"
+            "can_draw\tcan_draw_pct_over_plies\t"
+            "games_with_error\terror_game_pct\t"
+            "errors\terrors_per_ply_pct\t"
+            "missed_win_to_draw\tmissed_win_to_draw_pct_over_can_win\t"
+            "missed_win_to_loss\tmissed_win_to_loss_pct_over_can_win\t"
+            "missed_draw\tmissed_draw_pct_over_can_draw\t"
+            "err_win_opp_pct\terr_draw_opp_pct\t"
+            "time_losses\ttime_loss_pct"
+        )
 
     denom_used = b.games_used if b.games_used > 0 else 1
 
@@ -327,40 +342,55 @@ def print_bucket_full(b: BucketAgg, top: int, min_games: int, keep_types: Option
         if top and shown >= top:
             break
 
-        games = a.games
-        pct_used = (games / denom_used) * 100.0
-        avg_plies = (a.plies / games) if games else 0.0
-        
-        can_win_pct = (a.can_win / a.plies * 100.0) if a.plies else 0.0
-        can_draw_pct = (a.can_draw / a.plies * 100.0) if a.plies else 0.0
-        
-        err_game_pct = (a.games_with_error / games * 100.0) if games else 0.0
-        err_per_ply_pct = (a.errors_total / a.plies * 100.0) if a.plies else 0.0
-        
-        mw2d_pct = (a.missed_win_to_draw / a.can_win * 100.0) if a.can_win > 0 else 0.0
-        mw2l_pct = (a.missed_win_to_loss / a.can_win * 100.0) if a.can_win > 0 else 0.0
-        md_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
-        
-        missed_win = a.missed_win_to_draw + a.missed_win_to_loss
-        err_win_opp_pct = (missed_win / a.can_win * 100.0) if a.can_win > 0 else 0.0
-        err_draw_opp_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
-        
-        tl_pct = (a.time_losses / games * 100.0) if games else 0.0
+        if raw_only:
+            print(
+                f"{mat}\t"
+                f"{a.games}\t"
+                f"{a.plies}\t"
+                f"{a.can_win}\t"
+                f"{a.can_draw}\t"
+                f"{a.games_with_error}\t"
+                f"{a.errors_total}\t"
+                f"{a.missed_win_to_draw}\t"
+                f"{a.missed_win_to_loss}\t"
+                f"{a.missed_draw}\t"
+                f"{a.time_losses}"
+            )
+        else:
+            games = a.games
+            pct_used = (games / denom_used) * 100.0
+            avg_plies = (a.plies / games) if games else 0.0
+            
+            can_win_pct = (a.can_win / a.plies * 100.0) if a.plies else 0.0
+            can_draw_pct = (a.can_draw / a.plies * 100.0) if a.plies else 0.0
+            
+            err_game_pct = (a.games_with_error / games * 100.0) if games else 0.0
+            err_per_ply_pct = (a.errors_total / a.plies * 100.0) if a.plies else 0.0
+            
+            mw2d_pct = (a.missed_win_to_draw / a.can_win * 100.0) if a.can_win > 0 else 0.0
+            mw2l_pct = (a.missed_win_to_loss / a.can_win * 100.0) if a.can_win > 0 else 0.0
+            md_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
+            
+            missed_win = a.missed_win_to_draw + a.missed_win_to_loss
+            err_win_opp_pct = (missed_win / a.can_win * 100.0) if a.can_win > 0 else 0.0
+            err_draw_opp_pct = (a.missed_draw / a.can_draw * 100.0) if a.can_draw > 0 else 0.0
+            
+            tl_pct = (a.time_losses / games * 100.0) if games else 0.0
 
-        print(
-            f"{mat}\t"
-            f"{games}\t{pct_used:.3f}\t"
-            f"{a.plies}\t{avg_plies:.3f}\t"
-            f"{a.can_win}\t{can_win_pct:.3f}\t"
-            f"{a.can_draw}\t{can_draw_pct:.3f}\t"
-            f"{a.games_with_error}\t{err_game_pct:.3f}\t"
-            f"{a.errors_total}\t{err_per_ply_pct:.3f}\t"
-            f"{a.missed_win_to_draw}\t{mw2d_pct:.3f}\t"
-            f"{a.missed_win_to_loss}\t{mw2l_pct:.3f}\t"
-            f"{a.missed_draw}\t{md_pct:.3f}\t"
-            f"{err_win_opp_pct:.3f}\t{err_draw_opp_pct:.3f}\t"
-            f"{a.time_losses}\t{tl_pct:.3f}"
-        )
+            print(
+                f"{mat}\t"
+                f"{games}\t{pct_used:.3f}\t"
+                f"{a.plies}\t{avg_plies:.3f}\t"
+                f"{a.can_win}\t{can_win_pct:.3f}\t"
+                f"{a.can_draw}\t{can_draw_pct:.3f}\t"
+                f"{a.games_with_error}\t{err_game_pct:.3f}\t"
+                f"{a.errors_total}\t{err_per_ply_pct:.3f}\t"
+                f"{a.missed_win_to_draw}\t{mw2d_pct:.3f}\t"
+                f"{a.missed_win_to_loss}\t{mw2l_pct:.3f}\t"
+                f"{a.missed_draw}\t{md_pct:.3f}\t"
+                f"{err_win_opp_pct:.3f}\t{err_draw_opp_pct:.3f}\t"
+                f"{a.time_losses}\t{tl_pct:.3f}"
+            )
         shown += 1
 
 
@@ -461,6 +491,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Print notes about inferred denominators for per-material aggregation.",
     )
+    ap.add_argument(
+        "--raw-only",
+        action="store_true",
+        help="Output only raw integer counts in the per-material table (suppress percentages and rates).",
+    )
     return ap.parse_args(argv)
 
 
@@ -521,7 +556,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print_summary(bucket_list)
 
     for b in bucket_list:
-        print_bucket_full(b, top=args.top, min_games=args.min_games, keep_types=keep_types)
+        print_bucket_full(b, top=args.top, min_games=args.min_games, keep_types=keep_types, raw_only=args.raw_only)
 
     return 0
 

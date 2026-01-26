@@ -25,13 +25,8 @@ generate_tasks | xargs -n 3 -P 6 bash -c '
   elo_min="$2"
   elo_max="$3"
   
-  # Determine the correct input filename based on month
-  # 2025-11 and 2025-12 have different naming convention in the listing
-  if [[ "$m" > "2025-10" ]]; then
-    pgn_file="lichess_raw_data/lichess_db_standard_rated_${m}.pgn.zst"
-  else
-    pgn_file="lichess_raw_data/filtered_standard_rated_${m}_elo1400plus.pgn.zst"
-  fi
+  # All files now follow the same naming convention
+  pgn_file="lichess_raw_data/filtered_standard_rated_${m}_elo1400plus.pgn.zst"
 
   if [ ! -f "$pgn_file" ]; then
     echo "Error: File not found: $pgn_file" >&2
