@@ -1,6 +1,7 @@
 # month=2025-08
 # elo_min=2100
 # elo_max=2500
+# increment=yes
 # games_seen=30128224
 # games_used=884871
 # games_skipped_short_plycount<35=3872
