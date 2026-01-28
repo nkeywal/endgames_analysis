@@ -6,7 +6,7 @@ This toolkit analyzes chess endgames from large PGN databases (specifically Lich
 
 ### 1. Evaluation Logic (WDL vs DTM)
 The analysis is based strictly on **Tablebase WDL (Win/Draw/Loss)** data, not Distance-to-Mate (DTM).
-* **Correct Move:** A move is considered "perfect" if it preserves the optimal theoretical result. For example, in a winning position, any move that keeps the position winning is considered correct, even if it delays checkmate by 50 moves compared to the fastest mate.
+* **Correct Move:** A move is considered "good" if it preserves the best theoretical result, without taking into account the distance to mate (DTM). For example, in a winning position, any move that keeps the position winning is considered correct, even if it delays checkmate by 50 moves compared to the fastest mate.
 * **Error:** An error is recorded **only** if a move downgrades the theoretical result (e.g., `Win` $\to$ `Draw`, or `Draw` $\to$ `Loss`).
 
 ### 2. Material Key Format
